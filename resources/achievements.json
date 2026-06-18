@@ -1,0 +1,42 @@
+[
+  {
+    "Id": "general_100_kills",
+    "Name": "First Century",
+    "Description": "Kill 100 enemy players.",
+    "Category": "General",
+    "ServerTypes": ["all"],
+    "Event": "EventPlayerDeath",
+    "Target": "Attacker",
+    "Amount": 100,
+    "RewardCommands": [],
+    "RewardPhrase": "",
+    "Hidden": false
+  },
+  {
+    "Id": "retake_100_defuses",
+    "Name": "Clutch Technician",
+    "Description": "Defuse 100 bombs.",
+    "Category": "Retake",
+    "ServerTypes": ["retake"],
+    "Event": "EventBombDefused",
+    "Target": "Userid",
+    "Amount": 100,
+    "RewardCommands": [],
+    "RewardPhrase": "",
+    "Hidden": false
+  },
+  {
+    "Id": "bhop_3_map_wins",
+    "Name": "Map Finisher",
+    "Description": "Win 3 bhop maps.",
+    "Category": "Bhop",
+    "ServerTypes": ["bhop"],
+    "MapPrefixes": ["bhop_"],
+    "Event": "CustomMapWin",
+    "Target": "Userid",
+    "Amount": 3,
+    "RewardCommands": [],
+    "RewardPhrase": "",
+    "Hidden": false
+  }
+]
