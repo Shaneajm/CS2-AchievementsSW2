@@ -19,6 +19,7 @@ public partial class AchievementsSW2 : BasePlugin {
   public static IOptionsMonitor<PluginConfig> Config { get; private set; } = null!;
 
   private AchievementLoader _achievementLoader = null!;
+  private DatabaseService _database = null!;
 
   public AchievementsSW2(ISwiftlyCore core) : base(core)
   {
@@ -37,6 +38,7 @@ public partial class AchievementsSW2 : BasePlugin {
 
     _achievementLoader = new AchievementLoader(Core.Logger);
     LoadAchievements();
+    InitializeDatabase();
     RegisterCommands();
   }
 
@@ -98,5 +100,15 @@ public partial class AchievementsSW2 : BasePlugin {
     {
       Core.Logger.LogError(ex, "Failed to load achievement definitions.");
     }
+  }
+
+  private void InitializeDatabase()
+  {
+    _database = new DatabaseService(Config.CurrentValue.DatabaseConnection);
+
+    _ = Task.Run(async () =>
+    {
+      await _database.InitializeAsync();
+    });
   }
 } 
