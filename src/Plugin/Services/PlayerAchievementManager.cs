@@ -330,7 +330,7 @@ public sealed class PlayerAchievementManager(
 
 			JsonValueKind.String when achievementValue.GetString() is { } achievementString =>
 				eventValue is string eventString &&
-				eventString.Contains(achievementString, StringComparison.OrdinalIgnoreCase),
+				string.Equals(eventString, achievementString, StringComparison.OrdinalIgnoreCase),
 
 			_ => false
 		};

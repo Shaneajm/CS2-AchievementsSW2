@@ -14,9 +14,10 @@ public sealed class AchievementLoader(ILogger logger)
 		ReadCommentHandling = JsonCommentHandling.Skip,
 		AllowTrailingCommas = true
 	};
+	private static readonly HttpClient HttpClient = new();
 
 	private readonly ILogger _logger = logger;
-	private readonly List<AchievementDefinition> _achievements = [];
+	private volatile AchievementDefinition[] _achievements = [];
 
 	public IReadOnlyList<AchievementDefinition> Achievements => _achievements;
 
@@ -52,8 +53,7 @@ public sealed class AchievementLoader(ILogger logger)
 
 	private void ReplaceAchievements(IReadOnlyList<AchievementDefinition> achievements)
 	{
-		_achievements.Clear();
-		_achievements.AddRange(achievements);
+		_achievements = achievements.ToArray();
 	}
 
 	private static async Task<AchievementLoadResult> LoadFromFileAsync(string filePath)
@@ -92,12 +92,9 @@ public sealed class AchievementLoader(ILogger logger)
 
 		try
 		{
-			using var client = new HttpClient
-			{
-				Timeout = TimeSpan.FromSeconds(Math.Max(1, config.RemoteTimeoutSeconds))
-			};
-
-			var json = await client.GetStringAsync(config.RemoteUrl);
+			using var timeout = new CancellationTokenSource(
+				TimeSpan.FromSeconds(Math.Max(1, config.RemoteTimeoutSeconds)));
+			var json = await HttpClient.GetStringAsync(config.RemoteUrl, timeout.Token);
 			return LoadFromJson(json, config.RemoteUrl);
 		}
 		catch (Exception ex)

@@ -2,8 +2,10 @@ using AchievementsSW2.Plugin.Config;
 using AchievementsSW2.Plugin.Database.Migrations;
 using AchievementsSW2.Plugin.Models;
 using Dapper;
-using Dommel;
 using Microsoft.Extensions.Logging;
+using Microsoft.Data.Sqlite;
+using MySqlConnector;
+using Npgsql;
 
 namespace AchievementsSW2.Plugin.Services;
 
@@ -61,41 +63,6 @@ public sealed class DatabaseService(string connectionName)
 		}
 	}
 
-	public async Task<DbAchievementProgress?> GetProgressAsync(ulong steamId, string achievementId, string? seasonKey)
-	{
-		if (!IsEnabled)
-			return null;
-
-		try
-		{
-			using var connection = AchievementsSW2.Core.Database.GetConnection(_connectionName);
-			connection.Open();
-
-			return await connection.QueryFirstOrDefaultAsync<DbAchievementProgress>(
-				$"""
-				SELECT * FROM {TableName}
-				WHERE steamid64 = @SteamId64
-					AND achievement_id = @AchievementId
-					AND season_key = @SeasonKey
-				""",
-				new
-				{
-					SteamId64 = (long)steamId,
-					AchievementId = achievementId,
-					SeasonKey = NormalizeSeasonKey(seasonKey)
-				});
-		}
-		catch (Exception ex)
-		{
-			AchievementsSW2.Core.Logger.LogError(
-				ex,
-				"Failed to load progress for achievement {AchievementId} and player {SteamId}",
-				achievementId,
-				steamId);
-			return null;
-		}
-	}
-
 	public async Task<DbAchievementProgress?> SaveProgressAsync(
 		ulong steamId,
 		string achievementId,
@@ -115,57 +82,27 @@ public sealed class DatabaseService(string connectionName)
 			using var connection = AchievementsSW2.Core.Database.GetConnection(_connectionName);
 			connection.Open();
 
-			var existing = await connection.QueryFirstOrDefaultAsync<DbAchievementProgress>(
+			var parameters = new
+			{
+				SteamId64 = (long)steamId,
+				AchievementId = achievementId,
+				SeasonKey = normalizedSeasonKey,
+				Progress = Math.Max(0, progress),
+				Completed = completed,
+				CompletedAt = completed ? completedAt ?? now : (DateTime?)null,
+				UpdatedAt = now
+			};
+
+			await connection.ExecuteAsync(GetUpsertSql(connection), parameters);
+
+			return await connection.QueryFirstOrDefaultAsync<DbAchievementProgress>(
 				$"""
 				SELECT * FROM {TableName}
 				WHERE steamid64 = @SteamId64
 					AND achievement_id = @AchievementId
 					AND season_key = @SeasonKey
 				""",
-				new
-				{
-					SteamId64 = (long)steamId,
-					AchievementId = achievementId,
-					SeasonKey = normalizedSeasonKey
-				});
-
-			if (existing == null)
-			{
-				var row = new DbAchievementProgress
-				{
-					SteamId64 = (long)steamId,
-					AchievementId = achievementId,
-					SeasonKey = normalizedSeasonKey,
-					Progress = Math.Max(0, progress),
-					Completed = completed,
-					CompletedAt = completed ? completedAt ?? now : null,
-					UpdatedAt = now
-				};
-
-				var id = await connection.InsertAsync(row);
-				row.Id = Convert.ToInt32(id);
-				return row;
-			}
-
-			existing.Progress = Math.Max(0, progress);
-			existing.Completed = existing.Completed || completed;
-			existing.CompletedAt = existing.Completed
-				? existing.CompletedAt ?? completedAt ?? now
-				: null;
-			existing.UpdatedAt = now;
-
-			await connection.ExecuteAsync(
-				$"""
-				UPDATE {TableName}
-				SET progress = @Progress,
-					completed = @Completed,
-					completed_at = @CompletedAt,
-					updated_at = @UpdatedAt
-				WHERE id = @Id
-				""",
-				existing);
-
-			return existing;
+				parameters);
 		}
 		catch (Exception ex)
 		{
@@ -176,6 +113,65 @@ public sealed class DatabaseService(string connectionName)
 				steamId);
 			return null;
 		}
+	}
+
+	private static string GetUpsertSql(System.Data.IDbConnection connection)
+	{
+		return connection switch
+		{
+			MySqlConnection => $"""
+				INSERT INTO {TableName}
+					(steamid64, achievement_id, season_key, progress, completed, completed_at, updated_at)
+				VALUES
+					(@SteamId64, @AchievementId, @SeasonKey, @Progress, @Completed, @CompletedAt, @UpdatedAt)
+				ON DUPLICATE KEY UPDATE
+					progress = GREATEST(progress, VALUES(progress)),
+					completed = completed OR VALUES(completed),
+					completed_at = CASE
+						WHEN completed_at IS NOT NULL THEN completed_at
+						WHEN VALUES(completed) THEN VALUES(completed_at)
+						ELSE NULL
+					END,
+					updated_at = VALUES(updated_at)
+				""",
+
+			NpgsqlConnection => $"""
+				INSERT INTO {TableName}
+					(steamid64, achievement_id, season_key, progress, completed, completed_at, updated_at)
+				VALUES
+					(@SteamId64, @AchievementId, @SeasonKey, @Progress, @Completed, @CompletedAt, @UpdatedAt)
+				ON CONFLICT (steamid64, achievement_id, season_key) DO UPDATE
+				SET
+					progress = GREATEST({TableName}.progress, EXCLUDED.progress),
+					completed = {TableName}.completed OR EXCLUDED.completed,
+					completed_at = CASE
+						WHEN {TableName}.completed_at IS NOT NULL THEN {TableName}.completed_at
+						WHEN EXCLUDED.completed THEN EXCLUDED.completed_at
+						ELSE NULL
+					END,
+					updated_at = EXCLUDED.updated_at
+				""",
+
+			SqliteConnection => $"""
+				INSERT INTO {TableName}
+					(steamid64, achievement_id, season_key, progress, completed, completed_at, updated_at)
+				VALUES
+					(@SteamId64, @AchievementId, @SeasonKey, @Progress, @Completed, @CompletedAt, @UpdatedAt)
+				ON CONFLICT (steamid64, achievement_id, season_key) DO UPDATE
+				SET
+					progress = MAX(progress, excluded.progress),
+					completed = completed OR excluded.completed,
+					completed_at = CASE
+						WHEN completed_at IS NOT NULL THEN completed_at
+						WHEN excluded.completed THEN excluded.completed_at
+						ELSE NULL
+					END,
+					updated_at = excluded.updated_at
+				""",
+
+			_ => throw new NotSupportedException(
+				$"Unsupported database connection type: {connection.GetType().Name}")
+		};
 	}
 
 	public Task<DbAchievementProgress?> CompleteAchievementAsync(

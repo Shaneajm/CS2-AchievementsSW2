@@ -126,10 +126,9 @@ public partial class AchievementsSW2 : BasePlugin {
       _achievementLoader,
       () => Config.CurrentValue);
 
-    _ = Task.Run(async () =>
-    {
-      await _database.InitializeAsync();
-    });
+    _database.InitializeAsync()
+      .GetAwaiter()
+      .GetResult();
   }
 
   private void RegisterEventHandlers()
