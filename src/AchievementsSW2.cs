@@ -5,12 +5,15 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using AchievementsSW2.Plugin.Config;
+using AchievementsSW2.Plugin.Models;
 using AchievementsSW2.Plugin.Services;
+using SwiftlyS2.Core.Menus.OptionsBase;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
+using SwiftlyS2.Shared.Menus;
 using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.Plugins;
@@ -102,6 +105,17 @@ public partial class AchievementsSW2 : BasePlugin {
 
   private void RegisterCommands()
   {
+    if (Config.CurrentValue.Commands.Count > 0)
+    {
+      var primary = Config.CurrentValue.Commands[0];
+      Core.Command.RegisterCommand(primary, OnAchievementsCommand);
+
+      foreach (var alias in Config.CurrentValue.Commands.Skip(1))
+      {
+        Core.Command.RegisterCommandAlias(primary, alias);
+      }
+    }
+
     var command = Config.CurrentValue.AdminReloadCommand;
     if (!string.IsNullOrWhiteSpace(command))
     {
@@ -109,12 +123,156 @@ public partial class AchievementsSW2 : BasePlugin {
     }
   }
 
+  private void OnAchievementsCommand(ICommandContext ctx)
+  {
+    var player = ctx.Sender;
+    if (player?.IsValid != true)
+      return;
+
+    var achievementPlayer = _playerAchievementManager.GetPlayer(player);
+    if (achievementPlayer == null || !achievementPlayer.IsLoaded)
+    {
+      player.SendChat("[Achievements] Your achievement progress is still loading.");
+      return;
+    }
+
+    ShowAchievementsMenu(achievementPlayer);
+  }
+
   private void OnReloadCommand(ICommandContext ctx)
   {
+    LoadConfiguration();
     LoadAchievements();
     RegisterAchievementEvents();
     StartPlaytimeTimer();
+    RefreshOnlinePlayers();
     ctx.Reply($"Reloaded {_achievementLoader.Achievements.Count} achievement definitions.");
+  }
+
+  private void ShowAchievementsMenu(AchievementPlayer player)
+  {
+    var progress = _playerAchievementManager.GetProgressSnapshot(player);
+    var visibleAchievements = GetVisibleAchievements(player, progress)
+      .OrderBy(achievement => achievement.Category)
+      .ThenBy(achievement => achievement.Name)
+      .ToList();
+
+    var menuBuilder = Core.MenusAPI
+      .CreateBuilder()
+      .Design.SetMenuTitle("Achievements")
+      .Design.SetMenuTitleVisible(true)
+      .Design.SetMenuFooterVisible(true)
+      .Design.SetGlobalScrollStyle(MenuOptionScrollStyle.LinearScroll)
+      .SetPlayerFrozen(false);
+
+    if (_playerAchievementManager.ActivePlayerCount < Config.CurrentValue.MinimumPlayers)
+    {
+      menuBuilder.AddOption(new TextMenuOption(
+        $"<font color='#FF6B6B'>Progress requires {Config.CurrentValue.MinimumPlayers} active players.</font>"));
+    }
+
+    if (!visibleAchievements.Any())
+    {
+      menuBuilder.AddOption(new TextMenuOption("<font color='#888888'>No achievements are available for this server.</font>"));
+    }
+    else
+    {
+      foreach (var group in visibleAchievements.GroupBy(achievement => achievement.Category))
+      {
+        menuBuilder.AddOption(new TextMenuOption($"<font color='#4A90D9'>{group.Key}</font>"));
+
+        foreach (var achievement in group)
+        {
+          var row = GetProgressForAchievement(progress, achievement.Id);
+          var optionText = FormatAchievementRow(achievement, row);
+          var achievementCopy = achievement;
+          var rowCopy = row;
+
+          menuBuilder.AddOption(new SubmenuMenuOption(
+            optionText,
+            () => BuildAchievementDetailMenu(achievementCopy, rowCopy)));
+        }
+      }
+    }
+
+    Core.MenusAPI.OpenMenuForPlayer(player.Player, menuBuilder.Build());
+  }
+
+  private IMenuAPI BuildAchievementDetailMenu(AchievementDefinition achievement, PlayerAchievement? progress)
+  {
+    var completed = progress?.IsCompleted == true;
+    var currentProgress = Math.Min(progress?.Progress ?? 0, achievement.Amount);
+    var pct = achievement.Amount > 0 ? (int)((float)currentProgress / achievement.Amount * 100) : 0;
+
+    var detailBuilder = Core.MenusAPI
+      .CreateBuilder()
+      .Design.SetMenuTitle(achievement.Name)
+      .Design.SetMenuTitleVisible(true)
+      .Design.SetMenuFooterVisible(true)
+      .SetPlayerFrozen(false);
+
+    detailBuilder.AddOption(new TextMenuOption($"<font color='#AAAAAA'>{achievement.Description}</font>"));
+    detailBuilder.AddOption(new TextMenuOption($"<font color='#4A90D9'>Category: {achievement.Category}</font>"));
+
+    if (completed)
+    {
+      detailBuilder.AddOption(new TextMenuOption("<font color='#4CAF50'>Completed</font>"));
+      if (progress?.CompletedAt != null)
+      {
+        detailBuilder.AddOption(new TextMenuOption($"<font color='#AAAAAA'>Completed at: {progress.CompletedAt:yyyy-MM-dd HH:mm} UTC</font>"));
+      }
+    }
+    else
+    {
+      detailBuilder.AddOption(new TextMenuOption(
+        $"<font color='#FFD700'>Progress: {currentProgress}/{achievement.Amount} ({pct}%)</font>"));
+    }
+
+    var reward = string.IsNullOrWhiteSpace(achievement.RewardPhrase)
+      ? "No reward configured"
+      : achievement.RewardPhrase;
+    detailBuilder.AddOption(new TextMenuOption($"<font color='#4A90D9'>Reward: {reward}</font>"));
+
+    if (achievement.Hidden)
+    {
+      detailBuilder.AddOption(new TextMenuOption("<font color='#888888'>Hidden achievement</font>"));
+    }
+
+    return detailBuilder.Build();
+  }
+
+  private IEnumerable<AchievementDefinition> GetVisibleAchievements(
+    AchievementPlayer player,
+    IReadOnlyDictionary<string, PlayerAchievement> progress)
+  {
+    return _achievementLoader
+      .GetActiveAchievements(Config.CurrentValue.ServerType, _currentMapName)
+      .Where(achievement => string.IsNullOrWhiteSpace(achievement.Flag) ||
+        Core.Permission.PlayerHasPermission(player.SteamId, achievement.Flag))
+      .Where(achievement =>
+      {
+        if (!achievement.Hidden)
+          return true;
+
+        var row = GetProgressForAchievement(progress, achievement.Id);
+        return row is { IsCompleted: true } || (row?.Progress ?? 0) > 0;
+      });
+  }
+
+  private static PlayerAchievement? GetProgressForAchievement(
+    IReadOnlyDictionary<string, PlayerAchievement> progress,
+    string achievementId)
+  {
+    return progress.TryGetValue(achievementId, out var row) ? row : null;
+  }
+
+  private static string FormatAchievementRow(AchievementDefinition achievement, PlayerAchievement? progress)
+  {
+    if (progress?.IsCompleted == true)
+      return $"<font color='#4CAF50'>{achievement.Name} | Completed</font>";
+
+    var currentProgress = Math.Min(progress?.Progress ?? 0, achievement.Amount);
+    return $"<font color='#FFFFFF'>{achievement.Name} | {currentProgress}/{achievement.Amount}</font>";
   }
 
   private void LoadAchievements()
@@ -413,6 +571,11 @@ public partial class AchievementsSW2 : BasePlugin {
   }
 
   private void HandleHotReload()
+  {
+    RefreshOnlinePlayers();
+  }
+
+  private void RefreshOnlinePlayers()
   {
     Core.Scheduler.NextWorldUpdate(() =>
     {

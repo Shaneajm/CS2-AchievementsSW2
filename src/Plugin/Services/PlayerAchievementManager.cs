@@ -62,6 +62,14 @@ public sealed class PlayerAchievementManager(
 			: null;
 	}
 
+	public IReadOnlyDictionary<string, PlayerAchievement> GetProgressSnapshot(AchievementPlayer player)
+	{
+		return Snapshot(player).ToDictionary(
+			progress => progress.AchievementId,
+			progress => progress,
+			StringComparer.OrdinalIgnoreCase);
+	}
+
 	public void RemovePlayer(ulong steamId)
 	{
 		if (!_players.TryRemove(steamId, out var player))
