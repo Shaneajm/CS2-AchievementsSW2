@@ -1,7 +1,7 @@
 <div align="center">
   <img src="https://pan.samyyc.dev/s/VYmMXE" />
-  <h2><strong>Achievements </strong></h2>
-  <h3>Create achievements that players can get by doing custom tasks like kills, defuses, and more</h3>
+  <h2><strong>AchievementsSW2</strong></h2>
+  <h3>An acheivements system for SwifltyS2 CS2 servers.</h3>
 </div>
 
 <p align="center">
@@ -11,18 +11,94 @@
   <img src="https://img.shields.io/github/license/AVERAGE/AchievementsSW2" alt="License">
 </p>
 
-## Getting Started (delete me)
+## Info
+This plugin is a lightweight acheivements system for CS2 servers that want to have a system seperate from something like a battlepass system. Server owners can create achievements for any server or specific servers/gamemodes. 
 
-1. **Edit `PluginMetadata` Attribute**  
-   - Set your plugin's `Id`, `Name`, `Version`, `Author` and `Description`.
-2. **Edit `AchievementsSW2.csproj`**  
-   - Set the `<AssemblyName>` property to match your plugin's main class name.
-   - Add any additional dependencies as needed.
-3. **Implement your plugin logic** in C#.
-   - Place your main plugin class in the root of the project.
-   - Use the SwiftlyS2 managed API to interact with the game and core.
-4. **Add resources**  
-   - Place any required files in the `gamedata`, `templates`, or `translations` folders as needed.
+You can load the achievements from a local file or via a URL. Progress is saved in the database of your choice although only MySQL has been tested.
+
+## Features
+- Load achievements from a remote source (URL)
+- Supports [https://cs2.poggu.me/dumped-data/game-events/](CS2 Game Events)
+- Progress can be shared across mulitple servers.
+- Achievements can be restricted to specific servers/gamemodes.
+- Season support
+
+## Config
+```json
+{
+  "AchievementsSW2": {
+    "DatabaseConnection": "default",
+    "Commands": [
+      "achievements",
+      "achievement",
+      "ach"
+    ],
+    "AdminReloadCommand": "achievements_reload",
+    "ServerType": "default",
+    "AchievementSource": 0,
+    "RemoteUrl": "",
+    "RemoteTimeoutSeconds": 10,
+    "SeasonKey": null,
+    "MinimumPlayers": 0,
+    "AllowProgressDuringWarmup": false,
+    "EventDebugLogs": false
+  }
+}
+```
+
+## Achievements Example
+```json
+[
+  {
+    "Id": "general_100_kills",
+    "Name": "First Century",
+    "Description": "Kill 100 enemy players.",
+    "Category": "General",
+    "ServerTypes": [
+      "all"
+    ],
+    "Event": "EventPlayerDeath",
+    "Target": "Attacker",
+    "Amount": 100,
+    "RewardCommands": [],
+    "RewardPhrase": "",
+    "Hidden": false
+  },
+  {
+    "Id": "general_10_round_wins",
+    "Name": "On a Roll",
+    "Description": "Win 10 rounds.",
+    "Category": "General",
+    "ServerTypes": [
+      "all"
+    ],
+    "Event": "EventRoundEnd",
+    "Target": "winner",
+    "Amount": 10,
+    "RewardCommands": [
+      "say u0022{name}u0022 has won 10 rounds in a row!"
+    ],
+    "RewardPhrase": "Get a shoutout!",
+    "Hidden": false
+  },
+  {
+    "Id": "retake_100_defuses",
+    "Name": "Clutch Technician",
+    "Description": "Defuse 100 bombs.",
+    "Category": "Retake",
+    "ServerTypes": [
+      "retake"
+    ],
+    "Event": "EventBombDefused",
+    "Target": "Userid",
+    "Amount": 100,
+    "RewardCommands": [
+      "eco give {steamid64} 30.0 coins"
+    ],
+    "RewardPhrase": "30 coins",
+    "Hidden": false
+  }
+```
 
 ## Building
 
@@ -34,3 +110,6 @@
 
 - Use the `dotnet publish -c Release` command to build and package your plugin.
 - Distribute the generated zip file or the contents of the `build/publish` directory.# CS2-AchievementsSW2
+
+## Disclosure
+This plugin was written and reviewed with AI. I have personally reviewed the code and instructed the AI on what to do but there might be some issues. If you find any bugs or issues feel free to open a GitHub issue.
