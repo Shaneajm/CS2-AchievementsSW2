@@ -24,33 +24,31 @@ public sealed class PlayerAchievementManager(
 
 	public AchievementPlayer GetOrCreatePlayer(IPlayer player)
 	{
-		var created = false;
-		var achievementPlayer = _players.GetOrAdd(player.SteamID, _ =>
+		if (_players.TryGetValue(player.SteamID, out var existingPlayer))
+			return existingPlayer;
+
+		var achievementPlayer = new AchievementPlayer
 		{
-			created = true;
-			return new AchievementPlayer
+			SteamId = player.SteamID,
+			Player = player
+		};
+
+		if (!_players.TryAdd(player.SteamID, achievementPlayer))
+			return _players[player.SteamID];
+
+		RefreshActivePlayerCount();
+
+		_ = Task.Run(async () =>
+		{
+			try { await LoadPlayerDataAsync(achievementPlayer); }
+			catch (Exception ex)
 			{
-				SteamId = player.SteamID,
-				Player = player
-			};
+				AchievementsSW2.Core.Logger.LogError(
+					ex,
+					"Failed to load achievements for {SteamId}",
+					achievementPlayer.SteamId);
+			}
 		});
-
-		if (created)
-		{
-			RefreshActivePlayerCount();
-
-			_ = Task.Run(async () =>
-			{
-				try { await LoadPlayerDataAsync(achievementPlayer); }
-				catch (Exception ex)
-				{
-					AchievementsSW2.Core.Logger.LogError(
-						ex,
-						"Failed to load achievements for {SteamId}",
-						achievementPlayer.SteamId);
-				}
-			});
-		}
 
 		return achievementPlayer;
 	}
@@ -125,6 +123,7 @@ public sealed class PlayerAchievementManager(
 			return;
 
 		PlayerAchievement progress;
+		PlayerAchievement progressSnapshot;
 		var completedNow = false;
 
 		lock (player.ProgressLock)
@@ -149,15 +148,17 @@ public sealed class PlayerAchievementManager(
 				progress.CompletedAt = DateTime.UtcNow;
 				completedNow = true;
 			}
+
+			progressSnapshot = CloneProgress(progress);
 		}
 
 		if (completedNow)
 		{
-			CompleteAchievement(player, achievement, progress);
+			CompleteAchievement(player, achievement, progressSnapshot);
 			return;
 		}
 
-		SaveProgress(player.SteamId, progress);
+		SaveProgress(player.SteamId, progressSnapshot);
 	}
 
 	public async Task SaveAllPlayersAsync()
@@ -277,16 +278,18 @@ public sealed class PlayerAchievementManager(
 		lock (player.ProgressLock)
 		{
 			return player.Achievements.Values
-				.Select(progress => new PlayerAchievement
-				{
-					AchievementId = progress.AchievementId,
-					Progress = progress.Progress,
-					IsCompleted = progress.IsCompleted,
-					CompletedAt = progress.CompletedAt
-				})
+				.Select(CloneProgress)
 				.ToList();
 		}
 	}
+
+	private static PlayerAchievement CloneProgress(PlayerAchievement progress) => new()
+	{
+		AchievementId = progress.AchievementId,
+		Progress = progress.Progress,
+		IsCompleted = progress.IsCompleted,
+		CompletedAt = progress.CompletedAt
+	};
 
 	private void RefreshActivePlayerCount()
 	{
@@ -388,7 +391,7 @@ public sealed class PlayerAchievementManager(
 		{
 			{ "{slot}", player.Slot.ToString() },
 			{ "{userid}", player.PlayerID.ToString() },
-			{ "{name}", player.Controller?.PlayerName ?? "Unknown" },
+			{ "{name}", SanitizeCommandPlaceholder(player.Controller?.PlayerName) },
 			{ "{steamid64}", player.SteamID.ToString() },
 			{ "{steamid}", player.SteamID.ToString() },
 			{ "u0022", "\"" }
@@ -400,6 +403,20 @@ public sealed class PlayerAchievementManager(
 		}
 
 		return command;
+	}
+
+	private static string SanitizeCommandPlaceholder(string? value)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+			return "Unknown";
+
+		var sanitized = new string(value
+			.Where(static c => !char.IsControl(c) && c is not ';' and not '"' and not '\'' and not '`' and not '\\')
+			.Take(64)
+			.ToArray())
+			.Trim();
+
+		return sanitized.Length == 0 ? "Unknown" : sanitized;
 	}
 
 	public event Action<AchievementPlayer, AchievementDefinition, PlayerAchievement>? OnAchievementCompleted;

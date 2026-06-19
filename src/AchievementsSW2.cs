@@ -27,12 +27,14 @@ public partial class AchievementsSW2 : BasePlugin {
 
   public static new ISwiftlyCore Core { get; private set; } = null!;
   public static IOptionsMonitor<PluginConfig> Config { get; private set; } = null!;
+  private static ServiceProvider? _configurationServiceProvider;
 
   private AchievementLoader _achievementLoader = null!;
   private DatabaseService _database = null!;
   private PlayerAchievementManager _playerAchievementManager = null!;
   private CancellationTokenSource? _playtimeTimerCts;
   private readonly Dictionary<string, HashSet<string>> _registeredEvents = new(StringComparer.OrdinalIgnoreCase);
+  private readonly HashSet<string> _hookedEventTypes = new(StringComparer.OrdinalIgnoreCase);
   private string _currentMapName = string.Empty;
 
   private static readonly ConcurrentDictionary<Type, PropertyInfo?> AccessorPropertyCache = new();
@@ -83,6 +85,8 @@ public partial class AchievementsSW2 : BasePlugin {
     }
 
     _playerAchievementManager.Clear();
+    _configurationServiceProvider?.Dispose();
+    _configurationServiceProvider = null;
   }
 
   private static void LoadConfiguration()
@@ -99,8 +103,11 @@ public partial class AchievementsSW2 : BasePlugin {
       .AddOptionsWithValidateOnStart<PluginConfig>()
       .BindConfiguration(ConfigSection);
 
+    var previousProvider = _configurationServiceProvider;
     var provider = services.BuildServiceProvider();
     Config = provider.GetRequiredService<IOptionsMonitor<PluginConfig>>();
+    _configurationServiceProvider = provider;
+    previousProvider?.Dispose();
   }
 
   private void RegisterCommands()
@@ -322,6 +329,8 @@ public partial class AchievementsSW2 : BasePlugin {
 
   private void RegisterAchievementEvents()
   {
+    _registeredEvents.Clear();
+
     foreach (var achievement in _achievementLoader.Achievements)
     {
       if (string.Equals(achievement.Event, "PlayTime", StringComparison.OrdinalIgnoreCase))
@@ -335,18 +344,24 @@ public partial class AchievementsSW2 : BasePlugin {
         continue;
       }
 
-      if (_registeredEvents.TryGetValue(achievement.Event, out var targets))
+      if (!_registeredEvents.TryGetValue(achievement.Event, out var targets))
       {
-        targets.Add(achievement.Target);
-        continue;
+        targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _registeredEvents[achievement.Event] = targets;
       }
+
+      targets.Add(achievement.Target);
+
+      if (_hookedEventTypes.Contains(achievement.Event))
+        continue;
 
       if (RegisterEventForAchievement(achievement.Event))
       {
-        _registeredEvents[achievement.Event] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-          achievement.Target
-        };
+        _hookedEventTypes.Add(achievement.Event);
+      }
+      else
+      {
+        _registeredEvents.Remove(achievement.Event);
       }
     }
 
