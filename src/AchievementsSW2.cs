@@ -6,6 +6,9 @@ using AchievementsSW2.Plugin.Config;
 using AchievementsSW2.Plugin.Services;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
+using SwiftlyS2.Shared.GameEventDefinitions;
+using SwiftlyS2.Shared.GameEvents;
+using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Plugins;
 
 namespace AchievementsSW2;
@@ -20,6 +23,7 @@ public partial class AchievementsSW2 : BasePlugin {
 
   private AchievementLoader _achievementLoader = null!;
   private DatabaseService _database = null!;
+  private PlayerAchievementManager _playerAchievementManager = null!;
 
   public AchievementsSW2(ISwiftlyCore core) : base(core)
   {
@@ -40,9 +44,21 @@ public partial class AchievementsSW2 : BasePlugin {
     LoadAchievements();
     InitializeDatabase();
     RegisterCommands();
+    RegisterEventHandlers();
   }
 
   public override void Unload() {
+    try
+    {
+      Task.Run(async () => await _playerAchievementManager.SaveAllPlayersAsync())
+        .Wait(TimeSpan.FromSeconds(5));
+    }
+    catch (Exception ex)
+    {
+      Core.Logger.LogError(ex, "Failed to save achievement progress during unload.");
+    }
+
+    _playerAchievementManager.Clear();
   }
 
   private static void LoadConfiguration()
@@ -105,10 +121,55 @@ public partial class AchievementsSW2 : BasePlugin {
   private void InitializeDatabase()
   {
     _database = new DatabaseService(Config.CurrentValue.DatabaseConnection);
+    _playerAchievementManager = new PlayerAchievementManager(
+      _database,
+      _achievementLoader,
+      () => Config.CurrentValue);
 
     _ = Task.Run(async () =>
     {
       await _database.InitializeAsync();
     });
+  }
+
+  private void RegisterEventHandlers()
+  {
+    Core.GameEvent.HookPost<EventPlayerActivate>(OnPlayerActivate);
+    Core.GameEvent.HookPost<EventPlayerDisconnect>(OnPlayerDisconnect);
+    Core.GameEvent.HookPost<EventRoundEnd>(OnRoundEndSave);
+  }
+
+  private HookResult OnPlayerActivate(EventPlayerActivate @event)
+  {
+    var player = Core.PlayerManager.GetPlayer(@event.UserId);
+
+    if (player?.IsValid != true || player.IsFakeClient)
+      return HookResult.Continue;
+
+    _playerAchievementManager.GetOrCreatePlayer(player);
+    return HookResult.Continue;
+  }
+
+  private HookResult OnPlayerDisconnect(EventPlayerDisconnect @event)
+  {
+    var player = Core.PlayerManager.GetPlayer(@event.UserId);
+
+    if (player != null)
+    {
+      _playerAchievementManager.RemovePlayer(player.SteamID);
+    }
+
+    return HookResult.Continue;
+  }
+
+  private HookResult OnRoundEndSave(EventRoundEnd @event)
+  {
+    _ = Task.Run(async () =>
+    {
+      try { await _playerAchievementManager.SaveAllPlayersAsync(); }
+      catch (Exception ex) { Core.Logger.LogError(ex, "Failed to save achievement progress at round end."); }
+    });
+
+    return HookResult.Continue;
   }
 } 
