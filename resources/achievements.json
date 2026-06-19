@@ -26,15 +26,15 @@
     "Hidden": false
   },
   {
-    "Id": "bhop_3_map_wins",
-    "Name": "Map Finisher",
-    "Description": "Win 3 bhop maps.",
+    "Id": "bhop_500_jumps",
+    "Name": "Air Time",
+    "Description": "Jump 500 times on bhop maps.",
     "Category": "Bhop",
     "ServerTypes": ["bhop"],
     "MapPrefixes": ["bhop_"],
-    "Event": "CustomMapWin",
+    "Event": "EventPlayerJump",
     "Target": "Userid",
-    "Amount": 3,
+    "Amount": 500,
     "RewardCommands": [],
     "RewardPhrase": "",
     "Hidden": false

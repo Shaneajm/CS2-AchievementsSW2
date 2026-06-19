@@ -24,6 +24,7 @@ public sealed class AchievementLoader(ILogger logger)
 	public async Task<AchievementLoadResult> LoadAsync(string pluginPath, PluginConfig config)
 	{
 		var localPath = Path.Combine(pluginPath, "resources", "achievements.json");
+		AchievementLoadResult result;
 
 		if (config.AchievementSource == AchievementSource.Remote)
 		{
@@ -39,9 +40,25 @@ public sealed class AchievementLoader(ILogger logger)
 				localPath);
 		}
 
-		var localResult = await LoadFromFileAsync(localPath);
-		ReplaceAchievements(localResult.Achievements);
-		return localResult;
+		result = await LoadFromFileAsync(localPath);
+
+		if (result.Achievements.Count > 0)
+		{
+			ReplaceAchievements(result.Achievements);
+			return result;
+		}
+
+		if (_achievements.Length > 0)
+		{
+			var errors = result.Errors
+				.Concat(["Keeping the last loaded achievement catalog because the reload had no valid achievements."])
+				.ToList();
+
+			return new AchievementLoadResult(_achievements, errors, result.SourceDescription);
+		}
+
+		ReplaceAchievements(result.Achievements);
+		return result;
 	}
 
 	public IEnumerable<AchievementDefinition> GetActiveAchievements(string serverType, string? mapName = null)
