@@ -18,7 +18,7 @@ You can load the achievements from a local file or via a URL. Progress is saved 
 
 ## Features
 - Load achievements from a remote source (URL)
-- Supports [https://cs2.poggu.me/dumped-data/game-events/](CS2 Game Events)
+- Supports [CS2 Game Events](https://cs2.poggu.me/dumped-data/game-events/)
 - Progress can be shared across mulitple servers.
 - Achievements can be restricted to specific servers/gamemodes.
 - Season support
