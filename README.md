@@ -112,4 +112,9 @@ You can load the achievements from a local file or via a URL. Progress is saved 
 - Distribute the generated zip file or the contents of the `build/publish` directory.# CS2-AchievementsSW2
 
 ## Disclosure
-This plugin was written and reviewed with AI. I have personally reviewed the code and instructed the AI on what to do but there might be some issues. If you find any bugs or issues feel free to open a GitHub issue.
+AI was used in the creation of this plugin. I reviewed the code and did not let design decisions be outsourced to an agent.
+
+## Special Thanks
+This plugin wouldn't have been possible without the work and inspiration of these projects:
+- [K4-Missions - K4ryuu](https://github.com/K4ryuu/K4-Missions-SwiftlyS2)
+- [SwiflyS2](https://github.com/swiftly-solution/swiftlys2)
